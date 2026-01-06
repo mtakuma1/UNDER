@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>UNDERTALE Style - Complete Fix</title>
+    <style>
+        /* --- 【見た目（CSS）の設定】 --- */
+        @import url('https://fonts.googleapis.com/css2?family=DotGothic16&display=swap');
+        
+        body { 
+            background: #000; color: #fff; font-family: 'DotGothic16', sans-serif; 
+            margin: 0; padding: 0; overflow: hidden; width: 100vw; height: 100vh; position: fixed; 
+        }
+
+        /* 右上のポーズボタン（三本線）の見た目 */
+        #pause-btn {
+            position: absolute; top: 60px; right: 10px; 
+            background: rgba(0,0,0,0.6); color: #fff; border: 1px solid #fff; 
+            width: 40px; height: 40px; border-radius: 4px; cursor: pointer; 
+            z-index: 1000; font-size: 20px; display: flex; align-items: center; justify-content: center;
+        }
+
+        /* ポーズメニュー画面全体の背景 */
+        #pause-menu {
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+            background: rgba(0, 0, 0, 0.8); color: #fff;
+            display: none; flex-direction: column; align-items: center; justify-content: center;
+            z-index: 5000;
+        }
+        /* メニュー内の文字デザイン */
+        .menu-title { font-size: 40px; color: #ffff00; margin-bottom: 30px; }
+        .menu-item { 
+            font-size: 24px; margin: 15px; cursor: pointer; padding: 10px 40px;
+            border: 2px solid transparent; transition: 0.2s;
+        }
+        /* メニュー項目に触れたときの色変化 */
+        .menu-item:hover { border: 2px solid #fff; color: #ff0000; }
+
+        /* スタート画面（最前面に表示） */
+        #start-screen {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: #000; color: #fff; display: flex; flex-direction: column;
+            align-items: center; justify-content: center; z-index: 9999;
+            cursor: pointer; touch-action: none;
+        }
+        .start-text { font-size: 28px; margin-bottom: 20px; animation: blink 1s infinite; }
+        @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0; } 100% { opacity: 1; } }
+
+        /* フルスクリーンボタン、ステージ表示、操作ボタン */
+        #fs-btn { position: absolute; top: 10px; right: 10px; background: rgba(0,0,0,0.6); color: #fff; border: 1px solid #fff; padding: 10px 15px; border-radius: 4px; cursor: pointer; z-index: 1000; font-family: 'DotGothic16', sans-serif; }
+        .stage-box { position: absolute; top: 15px; left: 15px; border: 2px solid #fff; padding: 5px 15px; background: rgba(0,0,0,0.5); z-index: 1000; font-size: 18px; }
+        #game-wrapper { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
+        canvas { width: 100%; height: 100%; display: block; image-rendering: pixelated; }
+
+        /* スマホ用コントローラーの配置 */
+        .controls-left { position: absolute; bottom: 40px; left: 40px; display: flex; gap: 15px; z-index: 1000; }
+        .controls-right { position: absolute; bottom: 40px; right: 40px; z-index: 1000; }
+        .btn { width: 80px; height: 80px; border-radius: 50%; border: 4px solid #fff; background: rgba(0,0,0,0.2); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 30px; user-select: none; touch-action: none; }
+        .btn.active { background: rgba(255,255,255,0.4); }
+    </style>
+</head>
+<body>
+
+    <button id="pause-btn">☰</button>
+
+    <div id="pause-menu">
+        <div class="menu-title">PAUSE</div>
+        <div class="menu-item" onclick="togglePause()">RESUME</div> <div class="menu-item" onclick="loadStage(currentStageIndex); togglePause();">RESTART</div> <div class="menu-item" onclick="location.reload();">TITLE</div> </div>
+
+    <div id="start-screen">
+        <div class="start-text">TAP TO START</div>
+        <p style="color: #888;">Fullscreen & Sound will activate</p>
+    </div>
+
+    <button id="fs-btn">FULLSCREEN</button>
+    <div class="stage-box" id="stage-display">STAGE 1</div>
+    <div id="game-wrapper"><canvas id="gameCanvas"></canvas></div>
+
+    <div class="controls-left">
+        <div class="btn" id="btn-left" data-key="btn-left">◀</div>
+        <div class="btn" id="btn-right" data-key="btn-right">▶</div>
+    </div>
+    <div class="controls-right"><div class="btn" id="btn-jump" data-key="btn-jump">Z</div></div>
+
+    <script src="config.js"></script>
+    <script src="game.js"></script>
+    <script src="game2.js"></script>
+
+    <script>
+        /* --- 【プログラム（JavaScript）の設定】 --- */
+
+        // ゲーム内で使うデータの管理
+        let isPaused = false;         // ポーズ中かどうかのフラグ
+        let gameActive = false;       // ゲームが動いているか（開始前はfalse）
+        let keys = {};                // 押されているキーのリスト
+        let scrollX = 0;              // 画面のスクロール位置
+        let currentStageIndex = 1;    // 現在のステージ番号
+        let currentStageData = null;  // ステージのマップデータ
+        let player = { x: 0, y: 0, width: 22, height: 22, velX: 0, velY: 0, jumping: false }; // プレイヤーの状態
+        let enemies = [];             // 敵のリスト
+        let bullets = [];             // 飛んでいる弾のリスト
+
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const startScreen = document.getElementById('start-screen');
+        const fsBtn = document.getElementById('fs-btn');
+
+        // --- 音声データの準備 ---
+        const sounds = {
+            bgm: new Audio('sound/bgm.mp3'),
+            jump: new Audio('sound/jump.mp3'),
+            shoot: new Audio('sound/shoot.mp3'),
+            damage: new Audio('sound/damage.mp3'),
+            win: new Audio('sound/win.mp3')
+        };
+        sounds.bgm.loop = true;
+        sounds.bgm.volume = 0.3;
+
+        // 効果音を鳴らす関数（名前と音量を指定）
+        function playSound(name) {
+            try {
+                const s = sounds[name].cloneNode();
+                if (name === 'shoot') s.volume = 0.1;
+                else if (name === 'damage') s.volume = 0.3;
+                else if (name === 'win') s.volume = 1.0;
+                else s.volume = 0.5;
+                s.play().catch(() => {});
+            } catch(e) {}
+        }
+
+        // --- ポーズのオン・オフ切り替え ---
+        function togglePause() {
+            if (!gameActive) return;
+            isPaused = !isPaused;
+            const menu = document.getElementById('pause-menu');
+            if (isPaused) {
+                menu.style.display = 'flex';   // メニューを表示
+                sounds.bgm.volume = 0.1;      // BGMを小さく
+            } else {
+                menu.style.display = 'none';   // メニューを隠す
+                sounds.bgm.volume = 0.3;      // BGMを戻す
+            }
+        }
+
+        // --- ゲーム開始（TAP TO START後の処理） ---
+        function startGame(e) {
+            if (gameActive) return;
+            if (e) { e.preventDefault(); e.stopPropagation(); }
+
+            startScreen.style.display = 'none'; // スタート画面を隠す
+            startScreen.remove();              // 完全に消去（ボタンを触れるようにする）
+
+            // 音の再生リトライ（ブラウザ制限の回避）
+            const tryPlayBGM = () => {
+                sounds.bgm.play().then(() => {
+                    gameActive = true;
+                }).catch(() => {
+                    setTimeout(tryPlayBGM, 100);
+                });
+            };
+            tryPlayBGM();
+
+            gameActive = true; 
+            initCanvas();     // キャンバスサイズ設定
+            loadStage(1);     // ステージ1を読み込み
+            setupControls();  // ボタン操作を有効化
+            loop();           // ゲームループ開始
+        }
+
+        // スタート画面にクリック/タッチイベントを登録
+        startScreen.addEventListener('touchstart', startGame, {passive: false});
+        startScreen.addEventListener('mousedown', startGame);
+
+        // 画面サイズをブラウザに合わせる
+        function initCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+
+        // ステージデータの読み込み
+        function loadStage(num) {
+            const data = (num === 1) ? window.STAGE_DATA : window[`STAGE_DATA_${num}`];
+            if (data) {
+                currentStageData = data;
+                currentStageIndex = num;
+                player.x = data.startX;
+                player.y = data.startY;
+                player.velX = 0; player.velY = 0; scrollX = 0;
+                document.getElementById('stage-display').innerText = `STAGE ${num}`;
+                enemies = []; bullets = [];
+                const tileSize = 40;
+                // マップ上の敵(4)をスキャンして登録
+                data.map.forEach((row, y) => {
+                    row.forEach((tile, x) => {
+                        if (tile === 4) enemies.push({ x: x * tileSize, y: y * tileSize, width: tileSize, height: tileSize, lastShotTime: Date.now() });
+                    });
+                });
+            } else {
+                alert("ALL CLEAR!");
+                loadStage(1);
+            }
+        }
+
+        // ハート（ソウル）を描画する
+        function drawSoul(x, y) {
+            ctx.fillStyle = "#f00";
+            ctx.beginPath();
+            ctx.moveTo(x + 11, y + 4.4);
+            ctx.bezierCurveTo(x + 11, y, x, y, x, y + 11);
+            ctx.bezierCurveTo(x, y + 15.4, x + 11, y + 22, x + 11, y + 22);
+            ctx.bezierCurveTo(x + 11, y + 22, x + 22, y + 15.4, x + 22, y + 11);
+            ctx.bezierCurveTo(x + 22, y, x + 11, y, x + 11, y + 4.4);
+            ctx.fill();
+        }
+
+        // 衝突判定（壁、トゲ、ゴール、弾など）
+        function resolveCollisions(vx, vy) {
+            const tileSize = 40;
+            if (!currentStageData || !gameActive) return;
+            currentStageData.map.forEach((row, y) => {
+                row.forEach((tile, x) => {
+                    if (tile === 0 || tile === 4) return;
+                    let tx = x * tileSize, ty = y * tileSize;
+                    let tw = tileSize, th = (tile === 5) ? 4 : tileSize; // すり抜け床は高さ4px
+                    if (player.x < tx + tw && player.x + player.width > tx && player.y < ty + th && player.y + player.height > ty) {
+                        if (tile === 1 || tile === 5) { // 壁・床
+                            if (vy > 0) { player.y = ty - player.height; player.velY = 0; player.jumping = false; }
+                            else if (vy < 0 && tile === 1) { player.y = ty + th; player.velY = 0; }
+                            if (vx > 0 && tile === 1) player.x = tx - player.width;
+                            else if (vx < 0 && tile === 1) player.x = tx + tw;
+                        } else if (tile === 3) { // ゴール
+                            playSound('win');
+                            gameActive = false;
+                            setTimeout(() => { gameActive = true; loadStage(currentStageIndex + 1); }, 300);
+                        } else if (tile === 6) { // トゲ
+                            playSound('damage'); loadStage(currentStageIndex); 
+                        }
+                    }
+                });
+            });
+        }
+
+        // ゲーム内容の更新（1秒間に約60回実行）
+        function update() {
+            // ポーズ中なら何もしない
+            if (isPaused || !gameActive || !currentStageData) return;
+            
+            const config = window.CONFIG;
+            // 左右移動
+            if (keys['btn-right'] || keys['ArrowRight']) player.velX = config.moveSpeed;
+            else if (keys['btn-left'] || keys['ArrowLeft']) player.velX = -config.moveSpeed;
+            else player.velX *= 0.8;
+            
+            // ジャンプ
+            if ((keys['btn-jump'] || keys[' ']) && !player.jumping) { player.velY = -config.jumpPower; player.jumping = true; playSound('jump'); }
+            
+            player.velY += config.gravity;
+            player.x += player.velX; resolveCollisions(player.velX, 0);
+            player.y += player.velY; resolveCollisions(0, player.velY);
+            
+            // 落下判定
+            if (player.y > canvas.height + 200) loadStage(currentStageIndex);
+            // スクロール追従
+            if (player.x > canvas.width / 2) scrollX = player.x - canvas.width / 2;
+
+            // 敵の弾発射処理
+            enemies.forEach(enemy => {
+                const dx = (player.x + 11) - (enemy.x + 20), dy = (player.y + 11) - (enemy.y + 20);
+                if (Math.sqrt(dx*dx + dy*dy) < 500 && Date.now() - enemy.lastShotTime > config.enemyShotInterval) {
+                    const angle = Math.atan2(dy, dx);
+                    bullets.push({ x: enemy.x + 15, y: enemy.y + 15, velX: Math.cos(angle) * config.bulletSpeed, velY: Math.sin(angle) * config.bulletSpeed, width: 8, height: 8 });
+                    enemy.lastShotTime = Date.now();
+                    playSound('shoot');
+                }
+            });
+
+            // 弾の当たり判定と削除
+            bullets = bullets.filter(bullet => {
+                bullet.x += bullet.velX; bullet.y += bullet.velY;
+                if (player.x < bullet.x + 8 && player.x + 22 > bullet.x && player.y < bullet.y + 8 && player.y + 22 > bullet.y) {
+                    playSound('damage'); loadStage(currentStageIndex); return false;
+                }
+                return bullet.x > scrollX - 100 && bullet.x < scrollX + canvas.width + 100;
+            });
+        }
+
+        // 描画処理
+        function draw() {
+            ctx.fillStyle = "#000"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+            if (!gameActive) return;
+            ctx.save(); ctx.translate(-scrollX, 0); // 画面をスクロールさせる
+            if (currentStageData) {
+                currentStageData.map.forEach((row, y) => {
+                    row.forEach((tile, x) => {
+                        let tx = x * 40, ty = y * 40;
+                        if (tile === 1) { ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.strokeRect(tx + 2, ty + 2, 36, 36); }
+                        else if (tile === 3) { ctx.fillStyle = "#c1ff1d"; ctx.fillRect(tx + 10, ty + 10, 20, 20); }
+                        else if (tile === 4) { ctx.fillStyle = "#f00"; ctx.fillRect(tx + 5, ty + 5, 30, 30); }
+                        else if (tile === 5) { ctx.fillStyle = "#fff"; ctx.fillRect(tx, ty, 40, 3); }
+                        else if (tile === 6) { ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.moveTo(tx, ty + 40); ctx.lineTo(tx + 20, ty + 10); ctx.lineTo(tx + 40, ty + 40); ctx.fill(); }
+                    });
+                });
+            }
+            drawSoul(player.x, player.y);
+            ctx.fillStyle = "#fff"; bullets.forEach(b => ctx.fillRect(b.x, b.y, b.width, b.height));
+            ctx.restore();
+        }
+
+        // ゲームループ
+        function loop() { update(); draw(); requestAnimationFrame(loop); }
+        
+        // 操作設定（クリック、タッチ、キーボード）
+        function setupControls() {
+            const buttons = document.querySelectorAll('.btn');
+            
+            // フルスクリーン
+            fsBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {});
+                else document.exitFullscreen();
+            });
+
+            // ポーズボタン
+            document.getElementById('pause-btn').onclick = (e) => {
+                e.stopPropagation();
+                togglePause();
+            };
+
+            // スマホタッチ操作の判定
+            const handleTouch = (e) => {
+                if (e.target.id === 'fs-btn' || e.target.id === 'pause-btn' || isPaused) return;
+                e.preventDefault();
+                keys['btn-left'] = false; keys['btn-right'] = false; keys['btn-jump'] = false;
+                buttons.forEach(b => b.classList.remove('active'));
+                Array.from(e.touches).forEach(touch => {
+                    const el = document.elementFromPoint(touch.clientX, touch.clientY);
+                    if (el && el.classList.contains('btn')) {
+                        const key = el.getAttribute('data-key');
+                        keys[key] = true; el.classList.add('active');
+                    }
+                });
+            };
+            window.addEventListener('touchstart', handleTouch, {passive: false});
+            window.addEventListener('touchmove', handleTouch, {passive: false});
+            window.addEventListener('touchend', handleTouch, {passive: false});
+            window.addEventListener('keydown', e => keys[e.key] = true);
+            window.addEventListener('keyup', e => keys[e.key] = false);
+            window.addEventListener('resize', initCanvas);
+        }
+    </script>
+</body>
+</html>
